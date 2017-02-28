@@ -10,6 +10,8 @@ import aiomysql
 def log(sql, args=()):
     logging.info('SQL: %s' % sql)
 
+
+# 全局连接池
 async def create_pool(loop, **kw):
     logging.info('create database connection pool...')
     global __pool
@@ -26,27 +28,37 @@ async def create_pool(loop, **kw):
         loop=loop
     )
 
+
+# 封闭select
 async def select(sql, args, size=None):
     log(sql, args)
-    global __pool
-    async with __pool.get() as conn:
-        async with conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute(sql.replace('?', '%s'), args or ())
+    global __pool #引入全局连接池
+    async with __pool.get() as conn: #连接数据库
+        async with conn.cursor(aiomysql.DictCursor) as cur: #创建操作句柄
+            # 点位符自动替换 mysql 点位符是%s sql语句点位符是?
+            await cur.execute(sql.replace('?', '%s'), args or ()) #执行操作
             if size:
+                # 如果有size参数
                 rs = await cur.fetchmany(size)
             else:
+                # 没有size参数 获取所有
                 rs = await cur.fetchall()
         logging.info('rows returned: %s' % len(rs))
         return rs
 
+
+# 封装execute
 async def execute(sql, args, autocommit=True):
     log(sql)
-    async with __pool.get() as conn:
+    async with __pool.get() as conn: #连接数据库
         if not autocommit:
             await conn.begin()
         try:
+            # 创建操作句柄
             async with conn.cursor(aiomysql.DictCursor) as cur:
+                # 执行操作
                 await cur.execute(sql.replace('?', '%s'), args)
+                # 受影响的结果数
                 affected = cur.rowcount
             if not autocommit:
                 await conn.commit()
@@ -134,23 +146,25 @@ class ModelMetaclass(type):
         attrs['__delete__'] = 'delete from `%s` where `%s`=?' % (tableName, primaryKey)
         return type.__new__(cls, name, bases, attrs)
 
-class Model(dict, metaclass=ModelMetaclass):
 
+# 定义Model
+class Model(dict, metaclass=ModelMetaclass):
+    # 初始化
     def __init__(self, **kw):
         super(Model, self).__init__(**kw)
-
+    # 获取属性
     def __getattr__(self, key):
         try:
             return self[key]
         except KeyError:
             raise AttributeError(r"'Model' object has no attribute '%s'" % key)
-
+    # 设置属性
     def __setattr__(self, key, value):
         self[key] = value
-
+    # 获取值
     def getValue(self, key):
         return getattr(self, key, None)
-
+    # 获取值或者默认
     def getValueOrDefault(self, key):
         value = getattr(self, key, None)
         if value is None:
